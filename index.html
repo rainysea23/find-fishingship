@@ -226,6 +226,60 @@ try {
     }
 } catch(e) {}
 
+// Load history from GitHub Pages (24/7 VM logger sync)
+async function loadCloudHistory() {
+    try {
+        const resp = await fetch('ship_history.json?t=' + Date.now());
+        const data = await resp.json();
+        for (const [mmsi, info] of Object.entries(data)) {
+            const tracks = info.tracks || [];
+            if (tracks.length > 0) {
+                const pts = tracks.map(t => [t.lat, t.lon]);
+                // Merge with localStorage: take newer cloud data
+                const local = trackPoints[mmsi] || [];
+                if (pts.length >= local.length) {
+                    trackPoints[mmsi] = pts;
+                    // Also save to localStorage
+                    try {
+                        const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                        all[mmsi] = pts.slice(-2000);
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+                    } catch(e) {}
+                }
+            }
+        }
+        // Re-render with cloud data
+        updateCardsAndTracks();
+    } catch(e) {
+        console.log('Cloud history not available yet:', e.message);
+    }
+}
+
+function updateCardsAndTracks() {
+    Object.entries(trackPoints).forEach(([mmsi, pts]) => {
+        if (pts.length >= 2) {
+            const name = SHIPS[mmsi]?.name || mmsi;
+            const lastPt = pts[pts.length - 1];
+            if (!shipState[mmsi]?.lat) {
+                shipState[mmsi] = shipState[mmsi] || {};
+                shipState[mmsi].mmsi = mmsi;
+                shipState[mmsi].name = name;
+                shipState[mmsi].lat = lastPt[0];
+                shipState[mmsi].lon = lastPt[1];
+                shipState[mmsi].sog = '?';
+                shipState[mmsi].cog = '?';
+                shipState[mmsi].updated = new Date(0).toISOString();
+            }
+            renderTracks(mmsi, name);
+        }
+    });
+    updateCards();
+    const allPts = Object.values(trackPoints).flat();
+    if (allPts.length > 0) {
+        map.fitBounds(L.latLngBounds(allPts).pad(0.3));
+    }
+}
+
 function saveTracks() {
     try {
         // Save only last 2000 points per ship to avoid localStorage limits
@@ -526,7 +580,7 @@ function toggleTrack(mmsi, name) {
 buildToggles();
 connectWS();
 
-// Restore tracks from localStorage & render them
+// First: restore from localStorage
 Object.entries(trackPoints).forEach(([mmsi, pts]) => {
     if (pts.length >= 2) {
         const name = SHIPS[mmsi]?.name || mmsi;
@@ -541,16 +595,10 @@ Object.entries(trackPoints).forEach(([mmsi, pts]) => {
         renderTracks(mmsi, name);
     }
 });
-
 updateCards();
 
-// Fit map to saved tracks
-setTimeout(() => {
-    const allPts = Object.values(trackPoints).flat();
-    if (allPts.length > 0) {
-        map.fitBounds(L.latLngBounds(allPts).pad(0.3));
-    }
-}, 2000);
+// Then: load cloud history from VM (24/7 logger)
+loadCloudHistory();
 </script>
 </body>
 </html>
