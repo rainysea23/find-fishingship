@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Find FishingShip</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg: #0f172a; --bg2: #1e293b; --bg3: #334155;
+            --fg: #e2e8f0; --fg2: #94a3b8;
+            --accent: #38bdf8; --green: #34d399; --red: #f87171; --yellow: #fbbf24; --orange: #fb923c;
+            --border: #334155; --radius: 12px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg); color: var(--fg);
+            height: 100vh; height: 100dvh;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Topbar */
+        .topbar {
+            background: var(--bg2); border-bottom: 1px solid var(--border);
+            padding: 8px 12px; display: flex; align-items: center;
+            gap: 10px; z-index: 2000; flex-shrink: 0;
+        }
+        .topbar h1 {
+            font-size: 1rem; font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), #818cf8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            white-space: nowrap;
+        }
+        .ship-select {
+            flex: 1; max-width: 180px;
+            background: var(--bg3); color: var(--fg);
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 8px 12px; font-size: 0.85rem;
+            font-weight: 600; cursor: pointer;
+            -webkit-appearance: none; appearance: none;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+            background-repeat: no-repeat; background-position: right 8px center; background-size: 16px;
+            padding-right: 32px;
+        }
+        .topbar-right { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: var(--fg2); white-space: nowrap; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+        .status-dot.offline { background: var(--yellow); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Map */
+        #map { flex: 1; background: var(--bg3); z-index: 1; }
+        .leaflet-tile { filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7); }
+        .leaflet-container { background: #0a1628; }
+
+        /* Bottom sheet */
+        .sheet-handle {
+            width: 36px; height: 4px; background: var(--bg3);
+            border-radius: 2px; margin: 8px auto 0;
+        }
+        .bottom-sheet {
+            background: var(--bg2); border-top: 1px solid var(--border);
+            max-height: 35vh; overflow-y: auto; flex-shrink: 0;
+            z-index: 2000; transition: max-height 0.3s;
+        }
+        .bottom-sheet.expanded { max-height: 60vh; }
+        .sheet-inner { padding: 12px; display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; }
+
+        /* Mini card */
+        .mini-card {
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 12px;
+            min-width: 180px; max-width: 220px; flex-shrink: 0;
+            scroll-snap-align: start; transition: all 0.2s;
+            cursor: pointer;
+        }
+        .mini-card.active { border-color: var(--accent); box-shadow: 0 0 12px rgba(56,189,248,0.15); }
+        .mini-card.standby { opacity: 0.5; }
+        .mini-card .mc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .mini-card .mc-name { font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; }
+        .mini-card .mc-name .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .mini-card .mc-name .dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .mini-card .mc-name .dot.stale { background: var(--yellow); }
+        .mini-card .mc-name .dot.none { background: var(--fg2); }
+        .mini-card .mc-mmsi { font-size: 0.65rem; color: var(--fg2); font-family: monospace; }
+        .mini-card .mc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 0.75rem; }
+        .mini-card .mc-stat { text-align: center; }
+        .mini-card .mc-val { font-size: 0.95rem; font-weight: 700; color: var(--accent); }
+        .mini-card .mc-val.speed { color: var(--orange); }
+        .mini-card .mc-val.course { color: #818cf8; }
+        .mini-card .mc-lbl { font-size: 0.62rem; color: var(--fg2); }
+        .mini-card .mc-time { font-size: 0.62rem; color: var(--fg2); text-align: right; margin-top: 6px; font-family: monospace; }
+
+        /* Toast */
+        .toast {
+            position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+            background: var(--bg2); border: 1px solid var(--accent); border-radius: 8px;
+            padding: 8px 16px; font-size: 0.82rem; z-index: 3000;
+            animation: fadeInOut 2s ease forwards; pointer-events: none;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+            15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            75% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        @media (min-width: 769px) {
+            .main-layout { display: flex; flex: 1; overflow: hidden; }
+            #map { flex: 1; }
+            .bottom-sheet {
+                width: 350px; max-height: 100vh; border-top: none;
+                border-left: 1px solid var(--border); flex-shrink: 0;
+            }
+            .sheet-inner { flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+            .mini-card { min-width: auto; max-width: none; }
+            .sheet-handle { display: none; }
+            .ship-select { max-width: 200px; }
+        }
+
+        @media (max-width: 768px) {
+            .topbar { padding: 6px 10px; gap: 6px; }
+            .topbar h1 { font-size: 0.9rem; }
+            .ship-select { max-width: 140px; padding: 6px 8px; font-size: 0.78rem; }
+            .topbar-right { gap: 4px; font-size: 0.68rem; }
+            .sheet-handle { display: block; }
+            .sheet-inner { padding: 8px; gap: 8px; }
+            .mini-card { min-width: 155px; max-width: 180px; padding: 10px; }
+            .leaflet-control-zoom { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <h1>Find Ship</h1>
+    <select class="ship-select" id="ship-select" onchange="onShipSelect()">
+        <option value="all">All Ships</option>
+        <option value="440224530">Jidoho</option>
+        <option value="440337420">Karisma</option>
+    </select>
+    <div class="topbar-right">
+        <span id="conn-dot"><span class="status-dot offline"></span></span>
+        <span id="clock">--:--</span>
+    </div>
+</div>
+
+<div class="main-layout">
+    <div id="map"></div>
+    <div class="bottom-sheet" id="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-inner" id="sheet-inner">
+            <div class="mini-card standby"><div style="color:var(--fg2);text-align:center;">Waiting for signal...<br><small>Ship location will appear when AIS data is received</small></div></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ═══════════════════════════════════════════
+// Config
+// ═══════════════════════════════════════════
+const API_KEY = 'ba9afa83b068a42ebb39411cd587296f5f5c18b7';
+const SHIPS = {
+    '440224530': {name: 'Jidoho', label: 'JI DO'},
+    '440337420': {name: 'Karisma', label: 'CARISMA'},
+};
+const COLORS = {'Jidoho':'#38bdf8','Karisma':'#f59e0b'};
+
+// ═══════════════════════════════════════════
+// Map
+// ═══════════════════════════════════════════
+const map = L.map('map', {
+    center: [36.5, 129.5], zoom: 7,
+    zoomControl: window.innerWidth > 768,
+    attributionControl: false,
+});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:18}).addTo(map);
+
+function sColor(n) { return COLORS[n] || '#34d399'; }
+
+function shipIcon(name, heading) {
+    const c = sColor(name), rot = (heading||0) - 90;
+    return L.divIcon({
+        html: `<svg width="28" height="28" viewBox="0 0 24 24" fill="${c}"
+                     style="transform:rotate(${rot}deg);filter:drop-shadow(0 0 6px ${c})">
+                <path d="M12 3 L19 21 L12 17 L5 21 Z"/></svg>`,
+        className: 'ship-icon', iconSize: [28,28], iconAnchor: [14,14],
+    });
+}
+
+// ═══════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════
+let shipState = {};       // {mmsi: {lat,lon,sog,cog,heading,updated}}
+let trackPoints = {};     // {mmsi: [[lat,lon],...]}
+const markers = {};
+const trackLines = {};
+let selectedShip = 'all';
+const STORAGE_KEY = 'fishingShipTracks';
+
+// Load saved tracks from localStorage
+try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+        const data = JSON.parse(saved);
+        for (const [mmsi, pts] of Object.entries(data)) {
+            trackPoints[mmsi] = pts;
+        }
+    }
+} catch(e) {}
+
+function saveTracks() {
+    try {
+        // Save only last 2000 points per ship to avoid localStorage limits
+        const slim = {};
+        for (const [mmsi, pts] of Object.entries(trackPoints)) {
+            slim[mmsi] = pts.slice(-2000);
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+    } catch(e) {}
+}
+
+// ═══════════════════════════════════════════
+// Track rendering
+// ═══════════════════════════════════════════
+function renderTracks(mmsi, name) {
+    const pts = trackPoints[mmsi];
+    if (!pts || pts.length < 2) return;
+
+    if (trackLines[mmsi]) {
+        Object.values(trackLines[mmsi]).forEach(l => map.removeLayer(l));
+    }
+
+    const color = sColor(name);
+    const show = selectedShip === 'all' || selectedShip === mmsi;
+    const opacity = show ? 0.7 : 0.12;
+    const weight = show ? 3 : 1;
+
+    const full = L.polyline(pts, {
+        color, weight, opacity,
+        dashArray: show ? '' : '6 4',
+    });
+    if (show) full.addTo(map);
+
+    // Recent 1hr highlight
+    const hourAgo = Date.now() - 3600000;
+    const recent = [];
+    if (shipState[mmsi] && shipState[mmsi]._history) {
+        for (const t of shipState[mmsi]._history) {
+            if (new Date(t.time).getTime() >= hourAgo) {
+                recent.push([t.lat, t.lon]);
+            }
+        }
+    }
+    if (recent.length >= 2) {
+        const rLine = L.polyline(recent, {color, weight:weight+1, opacity:0.9}).addTo(map);
+        trackLines[mmsi] = {full, recent: rLine};
+    } else {
+        trackLines[mmsi] = {full, recent: null};
+    }
+}
+
+function addTrackPoint(mmsi, lat, lon, time) {
+    if (!trackPoints[mmsi]) trackPoints[mmsi] = [];
+    const pts = trackPoints[mmsi];
+    if (pts.length && pts[pts.length-1][0] === lat && pts[pts.length-1][1] === lon) return;
+    pts.push([lat, lon]);
+    if (pts.length > 5000) trackPoints[mmsi] = pts.slice(-5000);
+
+    // Also keep timestamped history
+    if (!shipState[mmsi]) shipState[mmsi] = {};
+    if (!shipState[mmsi]._history) shipState[mmsi]._history = [];
+    shipState[mmsi]._history.push({lat, lon, time});
+    if (shipState[mmsi]._history.length > 5000) shipState[mmsi]._history = shipState[mmsi]._history.slice(-5000);
+
+    saveTracks();
+}
+
+// ═══════════════════════════════════════════
+// Markers
+// ═══════════════════════════════════════════
+function updateMarkers() {
+    Object.entries(shipState).forEach(([mmsi, s]) => {
+        const lat = parseFloat(s.lat), lon = parseFloat(s.lon);
+        if (isNaN(lat) || isNaN(lon)) return;
+        const icon = shipIcon(s.name, parseFloat(s.heading)||0);
+        if (markers[mmsi]) {
+            markers[mmsi].setLatLng([lat, lon]).setIcon(icon);
+        } else {
+            markers[mmsi] = L.marker([lat, lon], {icon}).addTo(map)
+                .bindPopup(`<b>${s.name}</b><br>MMSI: ${mmsi}<br>Speed: ${s.sog||'?'}kn<br>Course: ${s.cog||'?'}&deg;`);
+        }
+    });
+}
+
+// ═══════════════════════════════════════════
+// Cards
+// ═══════════════════════════════════════════
+function updateCards() {
+    const container = document.getElementById('sheet-inner');
+    const ships = Object.values(shipState);
+    if (ships.length === 0) {
+        container.innerHTML = '<div class="mini-card standby"><div style="color:var(--fg2);text-align:center;">Waiting for signal...<br><small>Ship location will appear when AIS data is received</small></div></div>';
+        return;
+    }
+
+    container.innerHTML = ships.map(s => {
+        const now = Date.now();
+        const updated = s.updated ? new Date(s.updated).getTime() : 0;
+        const ageMin = updated ? Math.floor((now - updated) / 60000) : 999;
+        const isLive = ageMin < 3;
+        const dotClass = isLive ? 'live' : (ageMin < 60 ? 'stale' : 'none');
+        const cardClass = (selectedShip === 'all' || selectedShip === s.mmsi) ?
+            (isLive ? 'active' : '') : 'standby';
+        const lat = s.lat ? parseFloat(s.lat).toFixed(4) : '?';
+        const lon = s.lon ? parseFloat(s.lon).toFixed(4) : '?';
+        const sog = s.sog != null ? s.sog.toFixed(1) : '?';
+        const cog = s.cog != null ? s.cog.toFixed(0) : '?';
+        const ageStr = updated ? `${ageMin}m ago` : 'no signal';
+        const pts = trackPoints[s.mmsi] ? trackPoints[s.mmsi].length : 0;
+
+        return `<div class="mini-card ${cardClass}" onclick="focusShip('${s.mmsi}')">
+            <div class="mc-header">
+                <div class="mc-name"><span class="dot ${dotClass}"></span>${s.name}</div>
+                <div class="mc-mmsi">${s.mmsi}</div>
+            </div>
+            <div class="mc-stats">
+                <div class="mc-stat"><div class="mc-val">${lat}</div><div class="mc-lbl">Lat</div></div>
+                <div class="mc-stat"><div class="mc-val">${lon}</div><div class="mc-lbl">Lon</div></div>
+                <div class="mc-stat"><div class="mc-val speed">${sog}<span style="font-size:0.6rem"> kn</span></div><div class="mc-lbl">Speed</div></div>
+                <div class="mc-stat"><div class="mc-val course">${cog}<span style="font-size:0.6rem">&deg;</span></div><div class="mc-lbl">Course</div></div>
+            </div>
+            <div class="mc-time">${ageStr} | track: ${pts} pts</div>
+        </div>`;
+    }).join('');
+}
+
+// ═══════════════════════════════════════════
+// Ship selection
+// ═══════════════════════════════════════════
+function onShipSelect() {
+    selectedShip = document.getElementById('ship-select').value;
+    focusShip(selectedShip);
+}
+
+function focusShip(mmsi) {
+    document.getElementById('ship-select').value = mmsi;
+    selectedShip = mmsi;
+
+    updateCards();
+    Object.keys(trackLines).forEach(m => {
+        Object.values(trackLines[m]||{}).forEach(l => l && map.removeLayer(l));
+    });
+    Object.keys(trackPoints).forEach(m => {
+        const name = shipState[m]?.name || '';
+        if (name) renderTracks(m, name);
+    });
+
+    if (mmsi !== 'all' && trackPoints[mmsi] && trackPoints[mmsi].length > 0) {
+        const pts = trackPoints[mmsi];
+        map.flyTo([pts[pts.length-1][0], pts[pts.length-1][1]], 12, {duration:1});
+        if (markers[mmsi]) markers[mmsi].openPopup();
+        toast(`${shipState[mmsi]?.name||mmsi} selected`);
+    } else if (mmsi === 'all') {
+        const allPts = Object.values(trackPoints).flat();
+        if (allPts.length > 0) map.flyToBounds(L.latLngBounds(allPts).pad(0.3), {duration:1});
+    }
+}
+
+function toast(msg) {
+    const el = document.createElement('div');
+    el.className = 'toast'; el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2200);
+}
+
+// ═══════════════════════════════════════════
+// WebSocket to aisstream.io
+// ═══════════════════════════════════════════
+let ws = null;
+let wsReconnectTimer = null;
+
+function connectWS() {
+    if (ws) { try { ws.close(); } catch(e) {} }
+
+    const socket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+    ws = socket;
+
+    socket.onopen = () => {
+        console.log('AIS WebSocket connected');
+        document.getElementById('conn-dot').innerHTML = '<span class="status-dot online"></span>';
+
+        const sub = {
+            APIKey: API_KEY,
+            BoundingBoxes: [[[-90, -180], [90, 180]]],
+            FiltersShipMMSI: Object.keys(SHIPS),
+            FilterMessageTypes: ['PositionReport', 'ShipStaticData'],
+        };
+        socket.send(JSON.stringify(sub));
+        console.log('Subscribed:', Object.keys(SHIPS));
+    };
+
+    socket.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const msg = data.Message || {};
+            const pos = msg.PositionReport;
+            const ship = msg.ShipStaticData;
+
+            if (pos) {
+                const mmsi = String(pos.UserID || '');
+                if (SHIPS[mmsi]) {
+                    const now = new Date().toISOString();
+                    shipState[mmsi] = {
+                        mmsi, name: SHIPS[mmsi].name,
+                        lat: pos.Latitude, lon: pos.Longitude,
+                        sog: pos.Sog, cog: pos.Cog,
+                        heading: pos.TrueHeading, updated: now,
+                        _history: shipState[mmsi]?._history || [],
+                    };
+                    if (pos.Latitude != null && pos.Longitude != null) {
+                        addTrackPoint(mmsi, pos.Latitude, pos.Longitude, now);
+                    }
+                    updateCards();
+                    updateMarkers();
+                    renderTracks(mmsi, SHIPS[mmsi].name);
+                }
+            }
+            if (ship) {
+                const mmsi = String(ship.UserID || '');
+                if (SHIPS[mmsi]) {
+                    console.log(`Ship info: ${SHIPS[mmsi].name} - ${ship.ShipName||'?'} call=${ship.CallSign||'?'}`);
+                }
+            }
+        } catch(e) {
+            console.error('WS parse error:', e);
+        }
+    };
+
+    socket.onerror = (e) => {
+        console.error('WS error');
+        document.getElementById('conn-dot').innerHTML = '<span class="status-dot offline"></span>';
+    };
+
+    socket.onclose = (e) => {
+        console.log('WS closed, reconnect in 15s');
+        document.getElementById('conn-dot').innerHTML = '<span class="status-dot offline"></span>';
+        ws = null;
+        if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = setTimeout(connectWS, 15000);
+    };
+}
+
+// ═══════════════════════════════════════════
+// Clock
+// ═══════════════════════════════════════════
+function updateClock() {
+    document.getElementById('clock').textContent =
+        new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'});
+}
+setInterval(updateClock, 10000);
+updateClock();
+
+// ═══════════════════════════════════════════
+// Mobile sheet
+// ═══════════════════════════════════════════
+if (window.innerWidth <= 768) {
+    const sheet = document.getElementById('bottom-sheet');
+    document.querySelector('.sheet-handle').addEventListener('click', () => sheet.classList.toggle('expanded'));
+    let touchY = 0;
+    sheet.addEventListener('touchstart', e => { touchY = e.touches[0].clientY; }, {passive:true});
+    sheet.addEventListener('touchend', e => {
+        const dy = touchY - e.changedTouches[0].clientY;
+        if (dy > 20) sheet.classList.add('expanded');
+        if (dy < -20) sheet.classList.remove('expanded');
+    });
+}
+
+// ═══════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════
+connectWS();
+updateCards();
+
+// Restore tracks from localStorage
+Object.entries(trackPoints).forEach(([mmsi, pts]) => {
+    if (pts.length >= 2) {
+        const name = SHIPS[mmsi]?.name || mmsi;
+        const color = sColor(name);
+        L.polyline(pts, {color, weight: 2, opacity: 0.6, dashArray:'6 4'}).addTo(map);
+    }
+});
+
+// Fit map to saved tracks after load
+setTimeout(() => {
+    const allPts = Object.values(trackPoints).flat();
+    if (allPts.length > 0) {
+        map.fitBounds(L.latLngBounds(allPts).pad(0.3));
+    }
+}, 3000);
+</script>
+</body>
+</html>
