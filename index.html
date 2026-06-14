@@ -165,7 +165,15 @@
 // ═══════════════════════════════════════════
 // Config
 // ═══════════════════════════════════════════
-const API_KEY = 'ba9afa83b068a42ebb39411cd587296f5f5c18b7';
+// API key stored in localStorage (not in source code)
+let API_KEY = localStorage.getItem('ais_api_key') || '';
+if (!API_KEY) {
+    API_KEY = prompt('Enter your aisstream.io API key:');
+    if (API_KEY) {
+        localStorage.setItem('ais_api_key', API_KEY.trim());
+        location.reload();
+    }
+}
 const SHIPS = {
     '440224530': {name: 'Jidoho', label: 'JI DO'},
     '440337420': {name: 'Karisma', label: 'CARISMA'},
