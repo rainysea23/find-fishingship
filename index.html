@@ -158,6 +158,9 @@
             <div class="mini-card standby"><div style="color:var(--fg2);text-align:center;">Waiting for signal...<br><small>Ship location will appear when AIS data is received</small></div></div>
         </div>
     </div>
+    <div style="padding:8px 12px;background:var(--bg2);border-top:1px solid var(--border);flex-shrink:0;" id="track-toggles">
+        <span style="font-size:0.7rem;color:var(--fg2);margin-right:8px;">Tracks:</span>
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -241,20 +244,23 @@ function renderTracks(mmsi, name) {
     const pts = trackPoints[mmsi];
     if (!pts || pts.length < 2) return;
 
+    // Clear old layers
     if (trackLines[mmsi]) {
-        Object.values(trackLines[mmsi]).forEach(l => map.removeLayer(l));
+        Object.values(trackLines[mmsi]).forEach(l => l && map.removeLayer(l));
+        trackLines[mmsi] = {};
     }
 
     const color = sColor(name);
-    const show = selectedShip === 'all' || selectedShip === mmsi;
-    const opacity = show ? 0.7 : 0.12;
-    const weight = show ? 3 : 1;
+    const toggled = trackVisible[mmsi] !== false; // default on
+    const focused = selectedShip === 'all' || selectedShip === mmsi;
+    const show = toggled && focused;
 
     const full = L.polyline(pts, {
-        color, weight, opacity,
-        dashArray: show ? '' : '6 4',
+        color, weight: show ? 3 : 0.5,
+        opacity: show ? 0.7 : 0.08,
+        dashArray: show ? '' : '8 6',
     });
-    if (show) full.addTo(map);
+    if (show || focused) full.addTo(map);
 
     // Recent 1hr highlight
     const hourAgo = Date.now() - 3600000;
@@ -491,27 +497,60 @@ if (window.innerWidth <= 768) {
 }
 
 // ═══════════════════════════════════════════
+// Track toggles
+// ═══════════════════════════════════════════
+let trackVisible = {}; // {mmsi: true/false}, default true
+
+function buildToggles() {
+    const container = document.getElementById('track-toggles');
+    container.innerHTML = '<span style="font-size:0.7rem;color:var(--fg2);margin-right:8px;">Tracks:</span>' +
+        Object.entries(SHIPS).map(([mmsi, info]) => {
+            const color = sColor(info.name);
+            const checked = trackVisible[mmsi] !== false ? 'checked' : '';
+            return `<label style="font-size:0.7rem;color:var(--fg2);margin-right:10px;cursor:pointer;white-space:nowrap;">
+                <input type="checkbox" ${checked} onchange="toggleTrack('${mmsi}','${info.name}')" style="accent-color:${color};vertical-align:middle;">
+                <span style="display:inline-block;width:12px;height:3px;background:${color};vertical-align:middle;margin:0 2px;"></span>
+                ${info.name}
+            </label>`;
+        }).join('');
+}
+
+function toggleTrack(mmsi, name) {
+    trackVisible[mmsi] = document.querySelector(`input[onchange*="${mmsi}"]`).checked;
+    renderTracks(mmsi, name);
+}
+
+// ═══════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════
+buildToggles();
 connectWS();
-updateCards();
 
-// Restore tracks from localStorage
+// Restore tracks from localStorage & render them
 Object.entries(trackPoints).forEach(([mmsi, pts]) => {
     if (pts.length >= 2) {
         const name = SHIPS[mmsi]?.name || mmsi;
-        const color = sColor(name);
-        L.polyline(pts, {color, weight: 2, opacity: 0.6, dashArray:'6 4'}).addTo(map);
+        const lastPt = pts[pts.length - 1];
+        shipState[mmsi] = shipState[mmsi] || {
+            mmsi, name,
+            lat: lastPt[0], lon: lastPt[1],
+            sog: '?', cog: '?',
+            updated: new Date(0).toISOString(),
+            _history: [],
+        };
+        renderTracks(mmsi, name);
     }
 });
 
-// Fit map to saved tracks after load
+updateCards();
+
+// Fit map to saved tracks
 setTimeout(() => {
     const allPts = Object.values(trackPoints).flat();
     if (allPts.length > 0) {
         map.fitBounds(L.latLngBounds(allPts).pad(0.3));
     }
-}, 3000);
+}, 2000);
 </script>
 </body>
 </html>
